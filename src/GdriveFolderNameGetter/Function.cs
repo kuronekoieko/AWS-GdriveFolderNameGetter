@@ -3,11 +3,6 @@ using System.Net;
 using System.Text.Json;
 using Amazon.Lambda.Core;
 using Amazon.Lambda.APIGatewayEvents;
-using Google.Apis.Auth.OAuth2;
-using Google.Apis.Drive.v3;
-using Google.Apis.Services;
-using Amazon.SecretsManager;
-using Amazon.SecretsManager.Model;
 
 [assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
 
@@ -22,9 +17,12 @@ public class Function
 {
     public async Task<APIGatewayProxyResponse> FunctionHandler(FunctionInput input, ILambdaContext context)
     {
+        ResponseBody responseBody = new();
+
         if (string.IsNullOrEmpty(input.FolderId))
         {
-            return CreateResponse(HttpStatusCode.BadRequest, "Error: FolderId is required.");
+            responseBody.Error = "FolderId is required.";
+            return CreateResponse(HttpStatusCode.BadRequest, responseBody);
         }
 
         try
@@ -35,21 +33,24 @@ public class Function
             request.Fields = "name";
             var file = await request.ExecuteAsync();
 
-            return CreateResponse(HttpStatusCode.OK, $"Folder Name: {file.Name}");
+
+            responseBody.FolderName = file.Name;
+            return CreateResponse(HttpStatusCode.OK, responseBody);
         }
         catch (Exception ex)
         {
             context.Logger.LogError($"Error: {ex.ToString()}");
-            return CreateResponse(HttpStatusCode.InternalServerError, $"Error: {ex.Message}");
+            responseBody.Error = ex.Message;
+            return CreateResponse(HttpStatusCode.InternalServerError, responseBody);
         }
     }
 
-    private APIGatewayProxyResponse CreateResponse(HttpStatusCode statusCode, string body)
+    private APIGatewayProxyResponse CreateResponse(HttpStatusCode statusCode, ResponseBody responseBody)
     {
         return new APIGatewayProxyResponse
         {
             StatusCode = (int)statusCode,
-            Body = JsonSerializer.Serialize(new { message = body }),
+            Body = JsonSerializer.Serialize(responseBody),
             Headers = new Dictionary<string, string> { { "Content-Type", "application/json" } }
         };
     }
