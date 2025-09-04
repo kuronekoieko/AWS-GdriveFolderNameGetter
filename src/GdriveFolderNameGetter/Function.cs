@@ -29,7 +29,8 @@ public class Function
 
         try
         {
-            var driveService = await GetDriveService();
+            var driveServiceHelper = new DriveServiceHelper(); // 新しいクラスのインスタンスを作成
+            var driveService = await driveServiceHelper.GetDriveService();
             var request = driveService.Files.Get(input.FolderId);
             request.Fields = "name";
             var file = await request.ExecuteAsync();
@@ -41,27 +42,6 @@ public class Function
             context.Logger.LogError($"Error: {ex.ToString()}");
             return CreateResponse(HttpStatusCode.InternalServerError, $"Error: {ex.Message}");
         }
-    }
-
-    private async Task<DriveService> GetDriveService()
-    {
-        // Secrets ManagerからGCPの認証情報を取得
-        var secretsManagerClient = new AmazonSecretsManagerClient();
-        var secretRequest = new GetSecretValueRequest
-        {
-            SecretId = "gcp/credentials" // ステップ1で付けた名前
-        };
-        var secretResponse = await secretsManagerClient.GetSecretValueAsync(secretRequest);
-
-        // 取得した認証情報（JSON文字列）を使って認証
-        string[] scopes = { DriveService.Scope.DriveReadonly };
-        var credential = GoogleCredential.FromJson(secretResponse.SecretString).CreateScoped(scopes);
-
-        return new DriveService(new BaseClientService.Initializer()
-        {
-            HttpClientInitializer = credential,
-            ApplicationName = "GdriveFolderNameGetterLambda"
-        });
     }
 
     private APIGatewayProxyResponse CreateResponse(HttpStatusCode statusCode, string body)
