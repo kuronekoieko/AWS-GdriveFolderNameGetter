@@ -1,46 +1,75 @@
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Net.Http;
+using System;
+using System.Net;
 using System.Text.Json;
-
 using Amazon.Lambda.Core;
 using Amazon.Lambda.APIGatewayEvents;
+using Google.Apis.Auth.OAuth2;
+using Google.Apis.Drive.v3;
+using Google.Apis.Services;
+using Amazon.SecretsManager;
+using Amazon.SecretsManager.Model;
 
-// Assembly attribute to enable the Lambda function's JSON input to be converted into a .NET class.
 [assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
 
-namespace HelloWorld;
+namespace GdriveFolderNameGetter;
+
+public class FunctionInput
+{
+    public string? FolderId { get; set; }
+}
 
 public class Function
 {
-
-    private static readonly HttpClient client = new HttpClient();
-
-    private static async Task<string> GetCallingIP()
+    public async Task<APIGatewayProxyResponse> FunctionHandler(FunctionInput input, ILambdaContext context)
     {
-        client.DefaultRequestHeaders.Accept.Clear();
-        client.DefaultRequestHeaders.Add("User-Agent", "AWS Lambda .Net Client");
+        if (string.IsNullOrEmpty(input.FolderId))
+        {
+            return CreateResponse(HttpStatusCode.BadRequest, "Error: FolderId is required.");
+        }
 
-        var msg = await client.GetStringAsync("http://checkip.amazonaws.com/").ConfigureAwait(continueOnCapturedContext:false);
+        try
+        {
+            var driveService = await GetDriveService();
+            var request = driveService.Files.Get(input.FolderId);
+            request.Fields = "name";
+            var file = await request.ExecuteAsync();
 
-        return msg.Replace("\n","");
+            return CreateResponse(HttpStatusCode.OK, $"Folder Name: {file.Name}");
+        }
+        catch (Exception ex)
+        {
+            context.Logger.LogError($"Error: {ex.ToString()}");
+            return CreateResponse(HttpStatusCode.InternalServerError, $"Error: {ex.Message}");
+        }
     }
 
-    public async Task<APIGatewayProxyResponse> FunctionHandler(APIGatewayProxyRequest apigProxyEvent, ILambdaContext context)
+    private async Task<DriveService> GetDriveService()
     {
-
-        var location = await GetCallingIP();
-        var body = new Dictionary<string, string>
+        // Secrets ManagerからGCPの認証情報を取得
+        var secretsManagerClient = new AmazonSecretsManagerClient();
+        var secretRequest = new GetSecretValueRequest
         {
-            { "message", "hello world" },
-            { "location", location }
+            SecretId = "gcp/credentials" // ステップ1で付けた名前
         };
+        var secretResponse = await secretsManagerClient.GetSecretValueAsync(secretRequest);
 
+        // 取得した認証情報（JSON文字列）を使って認証
+        string[] scopes = { DriveService.Scope.DriveReadonly };
+        var credential = GoogleCredential.FromJson(secretResponse.SecretString).CreateScoped(scopes);
+
+        return new DriveService(new BaseClientService.Initializer()
+        {
+            HttpClientInitializer = credential,
+            ApplicationName = "GdriveFolderNameGetterLambda"
+        });
+    }
+
+    private APIGatewayProxyResponse CreateResponse(HttpStatusCode statusCode, string body)
+    {
         return new APIGatewayProxyResponse
         {
-            Body = JsonSerializer.Serialize(body),
-            StatusCode = 200,
+            StatusCode = (int)statusCode,
+            Body = JsonSerializer.Serialize(new { message = body }),
             Headers = new Dictionary<string, string> { { "Content-Type", "application/json" } }
         };
     }
