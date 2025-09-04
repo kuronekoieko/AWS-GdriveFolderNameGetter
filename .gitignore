@@ -17,6 +17,11 @@ samconfig.toml
 aws-lambda-tools-defaults.json
 
 # =========================================
+# AWS CLI credentials (念のため)
+# =========================================
+.aws/
+
+# =========================================
 # google cloud platform関連
 # =========================================
 credentials.json
